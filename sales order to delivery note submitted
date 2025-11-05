@@ -1,0 +1,70 @@
+// Delivery Note — toggle for new DN + auto-check & add row when created from SO
+const FREIGHT_ITEM_CODE = "Freight Charges";        // exact Item Code
+const APPLY_FREIGHT_FIELD = "custom_apply_freight"; // your checkbox
+
+frappe.ui.form.on("Delivery Note", {
+  onload(frm) {
+    apply_dn_rules(frm);
+  },
+  refresh(frm) {
+    apply_dn_rules(frm);
+  },
+  // For standalone DN, user toggle controls add/remove
+  custom_apply_freight(frm) {
+    if (!from_sales_order_dn(frm)) {
+      sync_freight_row_dn(frm);
+    }
+  }
+});
+
+/* -------- helpers -------- */
+
+function from_sales_order_dn(frm) {
+  // DN created from SO has so_detail on item rows
+  return (frm.doc.items || []).some(d => !!d.so_detail);
+}
+
+function apply_dn_rules(frm) {
+  if (from_sales_order_dn(frm)) {
+    // Auto-check + keep read-only (before and after Save)
+    if (!frm.doc[APPLY_FREIGHT_FIELD]) frm.set_value(APPLY_FREIGHT_FIELD, 1);
+    frm.set_df_property(APPLY_FREIGHT_FIELD, "read_only", 1);
+
+    // Ensure a Freight Charges row exists (but DO NOT lock it)
+    if (!has_freight_row_dn(frm)) add_freight_row_dn(frm);
+  } else {
+    // Standalone DN: checkbox editable and drives add/remove
+    frm.set_df_property(APPLY_FREIGHT_FIELD, "read_only", 0);
+    sync_freight_row_dn(frm);
+  }
+}
+
+function sync_freight_row_dn(frm) {
+  const want = !!frm.doc[APPLY_FREIGHT_FIELD];
+  const has  = has_freight_row_dn(frm);
+  if (want && !has) add_freight_row_dn(frm);
+  if (!want && has) remove_all_freight_rows_dn(frm);
+}
+
+function add_freight_row_dn(frm) {
+  const row = frm.add_child("items");
+  // Set item first so defaults (UOM/rate/description) populate
+  frappe.model.set_value(row.doctype, row.name, "item_code", FREIGHT_ITEM_CODE);
+  frappe.model.set_value(row.doctype, row.name, "qty", 1);
+  frm.refresh_field("items");
+  frm.script_manager?.trigger?.("calculate_taxes_and_totals");
+}
+
+function remove_all_freight_rows_dn(frm) {
+  frm.doc.items = (frm.doc.items || []).filter(
+    d => (d.item_code || "").trim().toLowerCase() !== FREIGHT_ITEM_CODE.toLowerCase()
+  );
+  frm.refresh_field("items");
+  frm.script_manager?.trigger?.("calculate_taxes_and_totals");
+}
+
+function has_freight_row_dn(frm) {
+  return (frm.doc.items || []).some(
+    d => (d.item_code || "").trim().toLowerCase() === FREIGHT_ITEM_CODE.toLowerCase()
+  );
+}
