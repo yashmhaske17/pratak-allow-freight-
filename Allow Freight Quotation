@@ -1,0 +1,52 @@
+// Quotation — auto add/remove a "Freight Charges" row when custom_allow_freight toggles
+
+const FREIGHT_ITEM_CODE = "Freight Charges";   // <-- exact Item Code, not the name
+
+frappe.ui.form.on("Quotation", {
+  onload(frm) {
+    manage_freight_row(frm);   // keep in sync when form opens
+  },
+  refresh(frm) {
+    manage_freight_row(frm);
+  },
+  custom_allow_freight(frm) {
+    manage_freight_row(frm);   // add/remove on toggle
+  }
+});
+
+function manage_freight_row(frm) {
+  const wantFreight = !!frm.doc.custom_allow_freight;
+  const idx = find_freight_row_index(frm);
+
+  if (wantFreight && idx === -1) {
+    // add at the end as the "next row"
+    const row = frm.add_child("items");
+    // set item_code first so ERPNext pulls description/rate etc.
+    frappe.model.set_value(row.doctype, row.name, "item_code", FREIGHT_ITEM_CODE);
+    frappe.model.set_value(row.doctype, row.name, "qty", 1);
+
+    frm.refresh_field("items");
+    // recalc totals (if applicable on your doctype)
+    if (frm.script_manager?.trigger) {
+      frm.script_manager.trigger("calculate_taxes_and_totals");
+    }
+  }
+
+  if (!wantFreight && idx > -1) {
+    // remove all Freight rows (avoid duplicates lingering)
+    frm.doc.items = (frm.doc.items || []).filter(
+      d => (d.item_code || "").trim().toLowerCase() !== FREIGHT_ITEM_CODE.toLowerCase()
+    );
+    frm.refresh_field("items");
+    if (frm.script_manager?.trigger) {
+      frm.script_manager.trigger("calculate_taxes_and_totals");
+    }
+  }
+}
+
+function find_freight_row_index(frm) {
+  const items = frm.doc.items || [];
+  return items.findIndex(
+    d => (d.item_code || "").trim().toLowerCase() === FREIGHT_ITEM_CODE.toLowerCase()
+  );
+}
