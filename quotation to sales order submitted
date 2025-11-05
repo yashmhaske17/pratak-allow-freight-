@@ -1,0 +1,77 @@
+// Sales Order — Apply Freight per latest rules
+const FREIGHT_ITEM_CODE = "Freight Charges";
+const ALLOW_FREIGHT_FIELD = "custom_allow_freight";
+
+frappe.ui.form.on("Sales Order", {
+  onload(frm) {
+    apply_behaviour(frm);
+  },
+  refresh(frm) {
+    apply_behaviour(frm);
+  },
+  [ALLOW_FREIGHT_FIELD](frm) {
+    // only for basic SOs (not from quotation) we auto add/remove
+    if (!from_quotation(frm)) {
+      sync_freight_row(frm);
+    }
+  }
+});
+
+// ---------------- helpers ----------------
+
+function apply_behaviour(frm) {
+  if (from_quotation(frm)) {
+    // 1) Coming from submitted Quotation:
+    //    - make checkbox read-only (both before and after save)
+    frm.set_df_property(ALLOW_FREIGHT_FIELD, "read_only", 1);
+    //    - do NOT lock the freight row, and do NOT force re-add on save
+    //      (so we don't call any "protect" or "validate" logic here)
+  } else {
+    // 2) Basic new Sales Order:
+    //    - normal toggle behaviour (add/remove)
+    sync_freight_row(frm);
+    //    - checkbox stays editable
+    frm.set_df_property(ALLOW_FREIGHT_FIELD, "read_only", 0);
+  }
+}
+
+function from_quotation(frm) {
+  // SO created via Quotation → SO will have quotation_item on child rows
+  return (frm.doc.items || []).some(d => !!d.quotation_item);
+}
+
+function sync_freight_row(frm) {
+  const want = !!frm.doc[ALLOW_FREIGHT_FIELD];
+  const has  = has_freight_row(frm);
+
+  if (want && !has) add_freight_row(frm);
+  if (!want && has) remove_all_freight_rows(frm);
+}
+
+function add_freight_row(frm) {
+  const row = frm.add_child("items");
+  // set item first so ERPNext pulls defaults
+  frappe.model.set_value(row.doctype, row.name, "item_code", FREIGHT_ITEM_CODE);
+  frappe.model.set_value(row.doctype, row.name, "qty", 1);
+
+  // Sales Order Item needs delivery_date
+  const dd = frm.doc.delivery_date || frappe.datetime.get_today();
+  frappe.model.set_value(row.doctype, row.name, "delivery_date", dd);
+
+  frm.refresh_field("items");
+  frm.script_manager?.trigger?.("calculate_taxes_and_totals");
+}
+
+function remove_all_freight_rows(frm) {
+  frm.doc.items = (frm.doc.items || []).filter(
+    d => (d.item_code || "").trim().toLowerCase() !== FREIGHT_ITEM_CODE.toLowerCase()
+  );
+  frm.refresh_field("items");
+  frm.script_manager?.trigger?.("calculate_taxes_and_totals");
+}
+
+function has_freight_row(frm) {
+  return (frm.doc.items || []).some(
+    d => (d.item_code || "").trim().toLowerCase() === FREIGHT_ITEM_CODE.toLowerCase()
+  );
+}
